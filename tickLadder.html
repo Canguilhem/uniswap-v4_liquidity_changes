@@ -1,0 +1,1201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Uniswap V4 — Tick Ladder Scenarios</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0f1117;
+        --surface: #161b27;
+        --surface2: #1c2333;
+        --border: #2a3347;
+        --border2: #3a4a63;
+        --text: #e2e8f0;
+        --muted: #7a8ba8;
+        --dim: #4a5a72;
+        --green: #34d399;
+        --green-bg: #0d2b20;
+        --green-border: #1a4a35;
+        --amber: #fbbf24;
+        --amber-bg: #2a1e08;
+        --amber-border: #4a3510;
+        --blue: #60a5fa;
+        --blue-bg: #0d1a2e;
+        --blue-border: #1a3050;
+        --purple: #a78bfa;
+        --purple-bg: #1a1230;
+        --mono: "IBM Plex Mono", monospace;
+        --sans: "IBM Plex Sans", sans-serif;
+        --radius: 6px;
+        --radius-sm: 4px;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 14px;
+        line-height: 1.6;
+        min-height: 100vh;
+        padding: 0;
+      }
+
+      .page {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 24px 48px;
+      }
+
+      .header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 20px;
+        margin-bottom: 28px;
+      }
+
+      .header-tag {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--green);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .header h1 {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 6px;
+      }
+
+      .header p {
+        font-size: 13px;
+        color: var(--muted);
+        max-width: 620px;
+      }
+
+      /* Scene tabs */
+      .scene-tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+      }
+
+      .scene-tab {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 7px 14px;
+        font-family: var(--sans);
+        font-size: 12px;
+        color: var(--muted);
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .scene-tab:hover {
+        border-color: var(--border2);
+        color: var(--text);
+      }
+
+      .scene-tab.active {
+        background: var(--blue-bg);
+        border-color: var(--blue-border);
+        color: var(--blue);
+      }
+
+      .scene-desc {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px 16px;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 20px;
+        line-height: 1.6;
+      }
+
+      /* Main grid */
+      .main-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
+      @media (max-width: 640px) {
+        .main-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+
+      .panel-header {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--dim);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .panel-body {
+        padding: 12px;
+      }
+
+      /* Price axis SVG */
+      #price-svg {
+        width: 100%;
+        display: block;
+      }
+
+      /* LP bars */
+      .lp-track {
+        position: relative;
+        height: 28px;
+        background: var(--surface2);
+        border-radius: var(--radius-sm);
+        margin-bottom: 6px;
+        overflow: hidden;
+      }
+
+      .lp-bar {
+        position: absolute;
+        top: 2px;
+        bottom: 2px;
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 8px;
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 500;
+        transition: all 0.35s ease;
+      }
+
+      .lp-in {
+        background: var(--green-bg);
+        border: 1px solid var(--green-border);
+        color: var(--green);
+      }
+      .lp-out {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--dim);
+      }
+
+      /* Event / computed boxes */
+      .code-box {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px 12px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text);
+        line-height: 1.7;
+        min-height: 60px;
+        white-space: pre-wrap;
+      }
+
+      .ev-tag {
+        display: inline-block;
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 500;
+        padding: 2px 7px;
+        border-radius: 3px;
+        margin-bottom: 6px;
+        letter-spacing: 0.04em;
+      }
+
+      .ev-swap {
+        background: var(--purple-bg);
+        border: 1px solid #3a2a60;
+        color: var(--purple);
+      }
+      .ev-mod {
+        background: var(--green-bg);
+        border: 1px solid var(--green-border);
+        color: var(--green);
+      }
+      .ev-none {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--dim);
+      }
+
+      /* Tick table */
+      .data-table {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        margin-bottom: 16px;
+      }
+
+      .dt-row {
+        display: grid;
+        grid-template-columns: 72px 110px 110px 1fr;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        transition: background 0.2s;
+      }
+
+      .dt-row:last-child {
+        border-bottom: none;
+      }
+
+      .dt-header {
+        background: var(--surface2);
+        color: var(--dim);
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .dt-changed {
+        background: var(--amber-bg) !important;
+        border-color: var(--amber-border) !important;
+      }
+      .dt-changed .mono {
+        color: var(--amber);
+      }
+
+      .mono {
+        font-family: var(--mono);
+        color: var(--text);
+      }
+      .note-col {
+        color: var(--dim);
+        font-size: 11px;
+      }
+
+      /* Snapshot table */
+      .snap-row {
+        display: grid;
+        grid-template-columns: 110px 70px 90px 1fr;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+      }
+
+      .snap-row:last-child {
+        border-bottom: none;
+      }
+      .snap-new {
+        background: var(--amber-bg);
+      }
+      .snap-new .trigger {
+        color: var(--amber);
+        font-weight: 500;
+      }
+      .snap-empty {
+        color: var(--dim);
+        font-size: 11px;
+        font-style: italic;
+      }
+
+      /* Score box */
+      .score-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px 14px;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.7;
+        margin-bottom: 20px;
+      }
+
+      .score-highlight {
+        color: var(--green);
+        font-family: var(--mono);
+      }
+      .score-warn {
+        color: var(--amber);
+        font-family: var(--mono);
+      }
+
+      /* Step controls */
+      .step-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-top: 4px;
+      }
+
+      .step-btn {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 7px 18px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text);
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .step-btn:hover:not(:disabled) {
+        border-color: var(--border2);
+        background: var(--surface2);
+      }
+      .step-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+
+      .step-label {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--dim);
+        flex: 1;
+      }
+
+      .step-title {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--blue);
+        margin-left: auto;
+      }
+
+      /* Section labels */
+      .section-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--dim);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .section-label .changed-note {
+        color: var(--amber);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .section-label .snap-note {
+        color: var(--dim);
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 400;
+      }
+      .section-label .snap-note.written {
+        color: var(--amber);
+      }
+
+      .full-row {
+        grid-column: 1 / -1;
+      }
+
+      /* Active liquidity callout */
+      .active-liq {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--dim);
+        padding: 6px 12px;
+        background: var(--surface2);
+        border-top: 1px solid var(--border);
+      }
+
+      .active-liq .val {
+        color: var(--green);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <div class="header-tag">Uniswap V4 — Indexer internals</div>
+        <h1>Tick ladder &amp; LP scoring scenarios</h1>
+        <p>
+          Step through three realistic scenarios to see how the tick table,
+          PoolSnapshot, and scoring formula respond to on-chain events in real
+          time.
+        </p>
+      </div>
+
+      <div class="scene-tabs" id="scene-tabs"></div>
+      <div class="scene-desc" id="scene-desc"></div>
+
+      <div class="main-grid">
+        <div>
+          <div class="section-label">Current price position</div>
+          <div class="panel">
+            <svg id="price-svg" viewBox="0 0 360 72">
+              <line
+                x1="16"
+                y1="36"
+                x2="344"
+                y2="36"
+                stroke="#2a3347"
+                stroke-width="1"
+              />
+              <defs>
+                <marker
+                  id="ah"
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="5"
+                  markerHeight="5"
+                  orient="auto-start-reverse"
+                >
+                  <path
+                    d="M2 1L8 5L2 9"
+                    fill="none"
+                    stroke="#2a3347"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </marker>
+              </defs>
+              <line
+                x1="344"
+                y1="36"
+                x2="344"
+                y2="36"
+                marker-end="url(#ah)"
+                stroke="#2a3347"
+              />
+              <g id="tick-marks-svg"></g>
+              <line
+                id="price-line"
+                x1="160"
+                y1="14"
+                x2="160"
+                y2="58"
+                stroke="#34d399"
+                stroke-width="1.5"
+                stroke-dasharray="4 3"
+              />
+              <rect
+                id="price-rect"
+                x="128"
+                y="6"
+                width="64"
+                height="18"
+                rx="3"
+                fill="#0d2b20"
+                stroke="#1a4a35"
+                stroke-width="1"
+              />
+              <text
+                id="price-text"
+                x="160"
+                y="18"
+                text-anchor="middle"
+                font-size="10"
+                fill="#34d399"
+                font-family="'IBM Plex Mono', monospace"
+              >
+                tick: 60
+              </text>
+            </svg>
+            <div class="active-liq">
+              active liquidity: <span class="val" id="active-liq-val">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-label">LP positions</div>
+          <div id="lp-container"></div>
+        </div>
+      </div>
+
+      <div class="main-grid">
+        <div>
+          <div class="section-label">Event fired</div>
+          <div id="event-box" class="code-box"></div>
+        </div>
+        <div>
+          <div class="section-label">Computed values</div>
+          <div
+            id="computed-box"
+            class="code-box"
+            style="font-family: var(--sans); color: var(--muted)"
+          ></div>
+        </div>
+      </div>
+
+      <div class="section-label">
+        Tick table
+        <span class="changed-note" id="changed-note"></span>
+      </div>
+      <div class="data-table">
+        <div class="dt-row dt-header">
+          <span>tickIndex</span><span>liquidityGross</span
+          ><span>liquidityNet</span><span>note</span>
+        </div>
+        <div id="tick-table-body"></div>
+      </div>
+
+      <div class="section-label">
+        PoolSnapshot written?
+        <span class="snap-note" id="snap-note"></span>
+      </div>
+      <div class="data-table" style="margin-bottom: 16px">
+        <div
+          class="snap-row dt-header"
+          style="
+            display: grid;
+            grid-template-columns: 110px 70px 90px 1fr;
+            padding: 7px 12px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--dim);
+            background: var(--surface2);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+          "
+        >
+          <span>blockNumber</span><span>tick</span><span>liquidity</span
+          ><span>triggerEvent</span>
+        </div>
+        <div id="snap-body"></div>
+      </div>
+
+      <div class="section-label">Score impact</div>
+      <div class="score-box" id="score-box"></div>
+
+      <div class="step-controls">
+        <button class="step-btn" id="btn-prev" onclick="step(-1)">
+          &#8592; prev
+        </button>
+        <span class="step-label" id="step-label"></span>
+        <span class="step-title" id="step-title"></span>
+        <button class="step-btn" id="btn-next" onclick="step(1)">
+          next &#8594;
+        </button>
+      </div>
+    </div>
+
+    <script>
+      const TICKS = [-120, -60, 0, 60, 120, 180, 240];
+      const TICK_XS = [28, 76, 124, 172, 220, 268, 316]; // in 360-wide SVG
+
+      const SCENES = [
+        {
+          label: "Scenario 1 — price crosses into Bob's range",
+          desc: "Current tick is 60. Alice is in range [-60, 180], Bob is out of range [120, 240]. A large swap drives the price up through tick 120, activating Bob's position mid-block.",
+          steps: [
+            {
+              title: "Block 21 500 000 — before swap",
+              tick: 60,
+              lps: [
+                { name: "Alice", lo: -60, hi: 180, liq: 5000, in: true },
+                { name: "Bob", lo: 120, hi: 240, liq: 8000, in: false },
+                { name: "Carol", lo: -120, hi: 0, liq: 3000, in: false },
+              ],
+              activeLiq: 5000,
+              evType: null,
+              event: "— (no event yet)",
+              computed:
+                "Active liquidity = 5 000\n(Alice only — Bob and Carol out of range)\n\nPool fee accrual goes 100% to Alice this block.",
+              ticks: [
+                {
+                  idx: -120,
+                  gross: 3000,
+                  net: "+3 000",
+                  note: "Carol lower",
+                  changed: false,
+                },
+                {
+                  idx: -60,
+                  gross: 5000,
+                  net: "+5 000",
+                  note: "Alice lower",
+                  changed: false,
+                },
+                {
+                  idx: 0,
+                  gross: 3000,
+                  net: "-3 000",
+                  note: "Carol upper",
+                  changed: false,
+                },
+                {
+                  idx: 120,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Bob lower",
+                  changed: false,
+                },
+                {
+                  idx: 180,
+                  gross: 5000,
+                  net: "-5 000",
+                  note: "Alice upper",
+                  changed: false,
+                },
+                {
+                  idx: 240,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Bob upper",
+                  changed: false,
+                },
+              ],
+              snap: null,
+              snapNote: "no snapshot — tick unchanged",
+              score:
+                '<span class="score-highlight">Alice</span>: earns 100% of swap fees this block.\n<span style="color:var(--dim)">Bob</span>: 0 — out of range, contributes nothing.\n<span style="color:var(--dim)">Carol</span>: 0 — out of range.',
+              observation:
+                "Only Alice is in range so she captures 100% of fee revenue this block. The score worker records blocksInRange += 1 for Alice only. This is the baseline state before any price movement.",
+            },
+            {
+              title: "Block 21 500 001 — swap crosses tick 120",
+              tick: 150,
+              lps: [
+                { name: "Alice", lo: -60, hi: 180, liq: 5000, in: true },
+                { name: "Bob", lo: 120, hi: 240, liq: 8000, in: true },
+                { name: "Carol", lo: -120, hi: 0, liq: 3000, in: false },
+              ],
+              activeLiq: 13000,
+              evType: "swap",
+              event:
+                "Swap(\n  poolId,\n  sender,\n  amount0 = -4.2 ETH,\n  sqrtPriceX96 = ...,\n  tick = 150,\n  liquidity = 13 000,\n  fee = ...\n)",
+              computed:
+                "tick before: 60  →  tick after: 150\nTick 120 was crossed → PoolSnapshot triggered\nNew active liquidity: 5 000 + 8 000 = 13 000\nfeeGrowthOutside updated on tick 120",
+              ticks: [
+                {
+                  idx: -120,
+                  gross: 3000,
+                  net: "+3 000",
+                  note: "Carol lower",
+                  changed: false,
+                },
+                {
+                  idx: -60,
+                  gross: 5000,
+                  net: "+5 000",
+                  note: "Alice lower",
+                  changed: false,
+                },
+                {
+                  idx: 0,
+                  gross: 3000,
+                  net: "-3 000",
+                  note: "Carol upper",
+                  changed: false,
+                },
+                {
+                  idx: 120,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Bob lower — feeGrowthOutside updated",
+                  changed: true,
+                },
+                {
+                  idx: 180,
+                  gross: 5000,
+                  net: "-5 000",
+                  note: "Alice upper",
+                  changed: false,
+                },
+                {
+                  idx: 240,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Bob upper",
+                  changed: false,
+                },
+              ],
+              snap: {
+                block: "21 500 001",
+                tick: 150,
+                liq: 13000,
+                trigger: "TICK_CROSSING",
+              },
+              snapNote: "written — tick crossed from 60 to 150",
+              score:
+                '<span class="score-highlight">Alice</span>: 5 000 / 13 000 = <span class="score-highlight">38.5%</span> of fees from this block forward.\n<span class="score-highlight">Bob</span>: 8 000 / 13 000 = <span class="score-highlight">61.5%</span> — now in range.\n<span style="color:var(--dim)">Carol</span>: 0 — still out of range.',
+              observation:
+                "A single swap crossing tick 120 activated Bob and split the fee stream. The PoolSnapshot written here is the only DB record the score worker needs to determine that both Alice and Bob were in range from block 21 500 001 onward — one row encodes the full state change.",
+            },
+          ],
+        },
+        {
+          label: "Scenario 2 — Alice adds more liquidity",
+          desc: "Price is at tick 150. Both Alice and Bob are in range. Alice adds 3 000 more liquidity to her existing position. Even though the tick doesn't move, a PoolSnapshot is triggered because active liquidity changed.",
+          steps: [
+            {
+              title: "Block 21 500 100 — before ModifyLiquidity",
+              tick: 150,
+              lps: [
+                { name: "Alice", lo: -60, hi: 180, liq: 5000, in: true },
+                { name: "Bob", lo: 120, hi: 240, liq: 8000, in: true },
+                { name: "Carol", lo: -120, hi: 0, liq: 3000, in: false },
+              ],
+              activeLiq: 13000,
+              evType: null,
+              event: "— (no event yet)",
+              computed:
+                "Active liquidity = 13 000\nAlice share: 5 000 / 13 000 ≈ 38.5%\nBob share:   8 000 / 13 000 ≈ 61.5%",
+              ticks: [
+                {
+                  idx: -60,
+                  gross: 5000,
+                  net: "+5 000",
+                  note: "Alice lower",
+                  changed: false,
+                },
+                {
+                  idx: 120,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Bob lower",
+                  changed: false,
+                },
+                {
+                  idx: 180,
+                  gross: 5000,
+                  net: "-5 000",
+                  note: "Alice upper",
+                  changed: false,
+                },
+                {
+                  idx: 240,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Bob upper",
+                  changed: false,
+                },
+              ],
+              snap: null,
+              snapNote: "no snapshot — tick still 150, liquidity unchanged",
+              score:
+                '<span class="score-highlight">Alice</span>: 38.5% of fees.\n<span class="score-highlight">Bob</span>: 61.5% of fees.',
+              observation:
+                "No events this block — no PoolSnapshot written. The score worker reconstructs tick 150 for this block using the backwards-scan query on the previous snapshot. Zero DB writes for quiet blocks is the key efficiency of the change-log pattern.",
+            },
+            {
+              title: "Block 21 500 101 — Alice adds 3 000 liquidity",
+              tick: 150,
+              lps: [
+                { name: "Alice", lo: -60, hi: 180, liq: 8000, in: true },
+                { name: "Bob", lo: 120, hi: 240, liq: 8000, in: true },
+                { name: "Carol", lo: -120, hi: 0, liq: 3000, in: false },
+              ],
+              activeLiq: 16000,
+              evType: "mod",
+              event:
+                "ModifyLiquidity(\n  poolId,\n  sender = Alice,\n  tickLower = -60,\n  tickUpper = 180,\n  liquidityDelta = +3 000,\n  salt = 0\n)",
+              computed:
+                "positionId = '{poolId}:alice:-60:180:0'\nPosition.liquidity:  5 000 → 8 000\nPool active liquidity: 13 000 → 16 000\n(position range contains current tick 150)\nPoolSnapshot triggered despite no tick crossing",
+              ticks: [
+                {
+                  idx: -60,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Alice lower — gross +3000, net +3000",
+                  changed: true,
+                },
+                {
+                  idx: 120,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Bob lower — unchanged",
+                  changed: false,
+                },
+                {
+                  idx: 180,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Alice upper — gross +3000, net -3000",
+                  changed: true,
+                },
+                {
+                  idx: 240,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Bob upper — unchanged",
+                  changed: false,
+                },
+              ],
+              snap: {
+                block: "21 500 101",
+                tick: 150,
+                liq: 16000,
+                trigger: "MODIFY_LIQUIDITY",
+              },
+              snapNote:
+                "written — active liquidity changed even though tick didn't move",
+              score:
+                '<span class="score-highlight">Alice</span>: 8 000 / 16 000 = <span class="score-highlight">50%</span> — up from 38.5%.\n<span class="score-highlight">Bob</span>: 8 000 / 16 000 = <span class="score-highlight">50%</span> — down from 61.5%.',
+              observation:
+                "ModifyLiquidity triggered a snapshot even though the price tick did not move. This is critical: without it the score worker would use stale liquidity (13 000) for all subsequent blocks and undercount Alice's share. The snapshot ensures the new depth ratio takes effect from exactly this block.",
+            },
+          ],
+        },
+        {
+          label: "Scenario 3 — JIT liquidity (consistency penalty)",
+          desc: "Price at tick 150, Alice in range. Bob removes all his liquidity in block 21 600 000, then re-adds it one block later just before a big swap. avg_holding_blocks ≈ 1 — the consistency_weight formula collapses his epoch reward.",
+          steps: [
+            {
+              title: "Block 21 600 000 — Bob removes all 8 000 liquidity",
+              tick: 150,
+              lps: [
+                { name: "Alice", lo: -60, hi: 180, liq: 8000, in: true },
+                { name: "Bob", lo: 120, hi: 240, liq: 0, in: false },
+                { name: "Carol", lo: -120, hi: 0, liq: 3000, in: false },
+              ],
+              activeLiq: 8000,
+              evType: "mod",
+              event:
+                "ModifyLiquidity(\n  poolId,\n  sender = Bob,\n  tickLower = 120,\n  tickUpper = 240,\n  liquidityDelta = -8 000,\n  salt = 0\n)",
+              computed:
+                "PositionEvent type = REMOVE\nPosition.liquidity: 8 000 → 0\nPool active liquidity: 16 000 → 8 000\nTick 120 and 240: liquidityGross → 0",
+              ticks: [
+                {
+                  idx: -60,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Alice lower — unchanged",
+                  changed: false,
+                },
+                {
+                  idx: 120,
+                  gross: 0,
+                  net: "0",
+                  note: "Bob lower — fully removed",
+                  changed: true,
+                },
+                {
+                  idx: 180,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Alice upper — unchanged",
+                  changed: false,
+                },
+                {
+                  idx: 240,
+                  gross: 0,
+                  net: "0",
+                  note: "Bob upper — fully removed",
+                  changed: true,
+                },
+              ],
+              snap: {
+                block: "21 600 000",
+                tick: 150,
+                liq: 8000,
+                trigger: "MODIFY_LIQUIDITY",
+              },
+              snapNote: "written — active liquidity dropped 16 000 → 8 000",
+              score:
+                '<span style="color:var(--dim)">Bob</span>: 0 this block (liquidity = 0).\n<span class="score-highlight">Alice</span>: earns 100% of fees.',
+              observation:
+                "The REMOVE PositionEvent is stored with its blockNumber. The score worker will later compute avg_holding_blocks by measuring the gap between this REMOVE and the preceding ADD. A gap of 1 block triggers near-zero consistency_weight.",
+            },
+            {
+              title: "Block 21 600 001 — Bob re-adds 8 000 liquidity",
+              tick: 150,
+              lps: [
+                { name: "Alice", lo: -60, hi: 180, liq: 8000, in: true },
+                { name: "Bob", lo: 120, hi: 240, liq: 8000, in: true },
+                { name: "Carol", lo: -120, hi: 0, liq: 3000, in: false },
+              ],
+              activeLiq: 16000,
+              evType: "mod",
+              event:
+                "ModifyLiquidity(\n  poolId,\n  sender = Bob,\n  tickLower = 120,\n  tickUpper = 240,\n  liquidityDelta = +8 000,\n  salt = 0\n)",
+              computed:
+                "PositionEvent type = ADD\nPosition.liquidity: 0 → 8 000\nPool active liquidity: 8 000 → 16 000\n\navg_holding_blocks for Bob this epoch ≈ 1\nconsistency_weight = 1 − exp(−0.001 × 1) ≈ 0.001",
+              ticks: [
+                {
+                  idx: -60,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Alice lower — unchanged",
+                  changed: false,
+                },
+                {
+                  idx: 120,
+                  gross: 8000,
+                  net: "+8 000",
+                  note: "Bob lower — restored",
+                  changed: true,
+                },
+                {
+                  idx: 180,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Alice upper — unchanged",
+                  changed: false,
+                },
+                {
+                  idx: 240,
+                  gross: 8000,
+                  net: "-8 000",
+                  note: "Bob upper — restored",
+                  changed: true,
+                },
+              ],
+              snap: {
+                block: "21 600 001",
+                tick: 150,
+                liq: 16000,
+                trigger: "MODIFY_LIQUIDITY",
+              },
+              snapNote: "written — active liquidity restored to 16 000",
+              score:
+                '<span style="color:var(--dim)">Bob holds 50% of active liquidity from this block forward.</span>\n\nscore(Bob) = TWAP_liq × time_weight × range_weight\n             × <span class="score-warn">consistency_weight ≈ 0.001</span>\n\n50% pool share × 0.001 = effectively 0 epoch rewards.',
+              observation:
+                "The DB state is entirely accurate — Bob's tick rows, liquidity, and PoolSnapshot are all correct. The JIT penalty is enforced purely in the scoring formula using PositionEvent history. No special indexer logic is needed: the event log is the audit trail.",
+            },
+          ],
+        },
+      ];
+
+      let scene = 0,
+        stepIdx = 0;
+
+      function tickX(tick) {
+        const min = -120,
+          max = 240,
+          range = max - min;
+        return 28 + ((tick - min) / range) * 288;
+      }
+
+      function setScene(i) {
+        scene = i;
+        stepIdx = 0;
+        document
+          .querySelectorAll(".scene-tab")
+          .forEach((b, j) => b.classList.toggle("active", j === i));
+        render();
+      }
+
+      function step(d) {
+        const s = SCENES[scene];
+        stepIdx = Math.max(0, Math.min(s.steps.length - 1, stepIdx + d));
+        render();
+      }
+
+      function render() {
+        const s = SCENES[scene];
+        const st = s.steps[stepIdx];
+
+        document.getElementById("scene-desc").textContent = s.desc;
+
+        // tick marks
+        const tg = document.getElementById("tick-marks-svg");
+        tg.innerHTML = "";
+        TICKS.forEach((t, i) => {
+          const x = TICK_XS[i];
+          const mk = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "line",
+          );
+          mk.setAttribute("x1", x);
+          mk.setAttribute("x2", x);
+          mk.setAttribute("y1", 28);
+          mk.setAttribute("y2", 44);
+          mk.setAttribute("stroke", "#2a3347");
+          mk.setAttribute("stroke-width", "1");
+          tg.appendChild(mk);
+          const lb = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "text",
+          );
+          lb.setAttribute("x", x);
+          lb.setAttribute("y", 60);
+          lb.setAttribute("text-anchor", "middle");
+          lb.setAttribute("font-size", "9");
+          lb.setAttribute("fill", "#4a5a72");
+          lb.setAttribute("font-family", "'IBM Plex Mono', monospace");
+          lb.textContent = t;
+          tg.appendChild(lb);
+        });
+
+        // price line
+        const px = tickX(st.tick);
+        document.getElementById("price-line").setAttribute("x1", px);
+        document.getElementById("price-line").setAttribute("x2", px);
+        document.getElementById("price-rect").setAttribute("x", px - 32);
+        const pt = document.getElementById("price-text");
+        pt.setAttribute("x", px);
+        pt.textContent = "tick: " + st.tick;
+
+        // active liquidity
+        document.getElementById("active-liq-val").textContent =
+          st.activeLiq.toLocaleString();
+
+        // LP bars
+        const lpC = document.getElementById("lp-container");
+        lpC.innerHTML = "";
+        const minT = -120,
+          maxT = 240,
+          range = maxT - minT;
+        st.lps.forEach((lp) => {
+          const outer = document.createElement("div");
+          outer.style.cssText = "margin-bottom:10px";
+
+          // label row: name | range | status badge
+          const labelRow = document.createElement("div");
+          labelRow.style.cssText =
+            "display:flex;align-items:center;gap:8px;margin-bottom:3px;padding:0 2px";
+
+          const nameSpan = document.createElement("span");
+          nameSpan.style.cssText = `font-family:var(--mono);font-size:11px;font-weight:500;min-width:36px;color:${lp.in ? "var(--green)" : "var(--dim)"}`;
+          nameSpan.textContent = lp.name;
+
+          const rangeSpan = document.createElement("span");
+          rangeSpan.style.cssText =
+            "font-family:var(--mono);font-size:10px;color:var(--dim);flex:1";
+          rangeSpan.textContent = `[${lp.lo}, ${lp.hi}]   liq: ${lp.liq.toLocaleString()}`;
+
+          const statusSpan = document.createElement("span");
+          statusSpan.style.cssText = lp.in
+            ? "font-size:10px;font-weight:500;padding:1px 7px;border-radius:3px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)"
+            : "font-size:10px;font-weight:500;padding:1px 7px;border-radius:3px;background:var(--surface2);color:var(--dim);border:1px solid var(--border)";
+          statusSpan.textContent = lp.in ? "in range" : "out of range";
+
+          labelRow.appendChild(nameSpan);
+          labelRow.appendChild(rangeSpan);
+          labelRow.appendChild(statusSpan);
+
+          // bar track
+          const wrap = document.createElement("div");
+          wrap.className = "lp-track";
+          wrap.style.marginBottom = "0";
+          const leftPct = ((lp.lo - minT) / range) * 100;
+          const widthPct = ((lp.hi - lp.lo) / range) * 100;
+          const bar = document.createElement("div");
+          bar.className = "lp-bar " + (lp.in ? "lp-in" : "lp-out");
+          bar.style.left = leftPct + "%";
+          bar.style.width = widthPct + "%";
+
+          // tick edge markers inside the bar
+          const loMark = document.createElement("span");
+          loMark.style.cssText =
+            "font-family:var(--mono);font-size:9px;opacity:0.65";
+          loMark.textContent = lp.lo;
+          const hiMark = document.createElement("span");
+          hiMark.style.cssText =
+            "font-family:var(--mono);font-size:9px;opacity:0.65";
+          hiMark.textContent = lp.hi;
+          bar.appendChild(loMark);
+          bar.appendChild(hiMark);
+
+          wrap.appendChild(bar);
+          outer.appendChild(labelRow);
+          outer.appendChild(wrap);
+          lpC.appendChild(outer);
+        });
+
+        // event box
+        const eb = document.getElementById("event-box");
+        if (st.evType) {
+          const tagLabel = st.evType === "swap" ? "Swap" : "ModifyLiquidity";
+          const tagClass = st.evType === "swap" ? "ev-swap" : "ev-mod";
+          eb.innerHTML = `<div class="ev-tag ${tagClass}">${tagLabel}</div>\n${st.event}`;
+        } else {
+          eb.innerHTML = `<div class="ev-tag ev-none">no event</div>\n${st.event}`;
+        }
+
+        // computed
+        document.getElementById("computed-box").textContent = st.computed;
+
+        // tick table
+        const changed = st.ticks.some((t) => t.changed);
+        document.getElementById("changed-note").textContent = changed
+          ? "— highlighted rows updated this event"
+          : "";
+        const ttb = document.getElementById("tick-table-body");
+        ttb.innerHTML = st.ticks
+          .map(
+            (t) => `
+    <div class="dt-row${t.changed ? " dt-changed" : ""}">
+      <span class="mono">${t.idx}</span>
+      <span class="mono">${t.gross.toLocaleString()}</span>
+      <span class="mono">${t.net}</span>
+      <span class="note-col">${t.note}</span>
+    </div>
+  `,
+          )
+          .join("");
+
+        // snapshot
+        const sn = document.getElementById("snap-note");
+        sn.textContent = "— " + st.snapNote;
+        sn.className = "snap-note" + (st.snap ? " written" : "");
+
+        const sb = document.getElementById("snap-body");
+        if (st.snap) {
+          sb.innerHTML = `<div class="snap-row snap-new">
+      <span class="mono">${st.snap.block}</span>
+      <span class="mono">${st.snap.tick}</span>
+      <span class="mono">${st.snap.liq.toLocaleString()}</span>
+      <span class="mono trigger">${st.snap.trigger}</span>
+    </div>`;
+        } else {
+          sb.innerHTML = `<div class="snap-row"><span class="snap-empty">no snapshot written this block</span></div>`;
+        }
+
+        // score + observation
+        const scoreEl = document.getElementById("score-box");
+        let scoreHTML = st.score;
+        if (st.observation) {
+          scoreHTML += `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);color:var(--blue);font-size:11px;font-family:var(--sans);line-height:1.6"><span style="font-weight:500;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;color:var(--dim);display:block;margin-bottom:3px">Key takeaway</span>${st.observation}</div>`;
+        }
+        scoreEl.innerHTML = scoreHTML;
+
+        // nav
+        document.getElementById("step-label").textContent =
+          `step ${stepIdx + 1} / ${s.steps.length}`;
+        document.getElementById("step-title").textContent = st.title;
+        document.getElementById("btn-prev").disabled = stepIdx === 0;
+        document.getElementById("btn-next").disabled =
+          stepIdx === s.steps.length - 1;
+      }
+
+      // Build scene tabs
+      const tabsEl = document.getElementById("scene-tabs");
+      SCENES.forEach((s, i) => {
+        const btn = document.createElement("button");
+        btn.className = "scene-tab" + (i === 0 ? " active" : "");
+        btn.textContent = s.label;
+        btn.onclick = () => setScene(i);
+        tabsEl.appendChild(btn);
+      });
+
+      render();
+    </script>
+  </body>
+</html>
