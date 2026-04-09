@@ -1,0 +1,376 @@
+// Uniswap v4 indexing + LP incentive engine (PostgreSQL)
+// See README.md for PoolId vs PoolKey, StateView vs Initialize.
+//
+// Relations: fields like `swaps Swap[]` are Prisma ONE-TO-MANY relations — they become
+// a `poolId` (etc.) foreign key on the child TABLE, not a PG array column. Query with JOINs.
+// `Json` on Campaign / Allocation is optional document storage; use `CampaignParam` when you
+// need indexed, relational campaign knobs (filters, SQL constraints).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// All tables and enums live in this PostgreSQL schema (e.g. Supabase: create via `db push`).
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["univ4"]
+}
+
+// --- Chains & reference ----------------------------------------------------
+
+// finalityTag controls which block tag the poller uses per chain.
+// FINALIZED: Ethereum mainnet, Polygon, ZKSync (cryptographic/economic finality)
+// SAFE:      OP Stack chains (Base, Optimism), Arbitrum (sequencer committed)
+//            Never use FINALIZED on Arbitrum -- 7-day fraud-proof window.
+enum FinalityTag {
+  FINALIZED
+  SAFE
+  LATEST
+  @@schema("univ4")
+}
+
+enum ChainType {
+  L1
+  OP_STACK
+  ARBITRUM
+  ZKSYNC
+  @@schema("univ4")
+}
+
+model Chain {
+  id                 Int         @id @default(autoincrement())
+  chainId            Int         @unique
+  name               String
+  type               ChainType
+  poolManager        String                       // PoolManager singleton address
+  positionManager    String?                      // PositionManager address -- required to index Transfer events for owner resolution
+  stateView          String?                      // StateView lens address
+  deployedBlock      BigInt                       // backfill starts here
+  indexerHead        BigInt      @default(0)
+  finalityTag        FinalityTag @default(FINALIZED)
+  pollIntervalSec    Int         @default(120)
+  blockTimeMs        Int         @default(12000)  // used for lag-in-seconds calc
+  maxLogsBlockRange  Int         @default(2000)   // provider cap on eth_getLogs
+  rpcUrl             String
+  rpcUrlFallback     String?
+
+  pools   Pool[]
+  tokens  Token[]
+
+  @@schema("univ4")
+}
+
+model Token {
+  id        String   @id  // '{chainId}:{address}' or '{chainId}:native'
+  chainId   Int
+  address   String?       // null for native ETH sentinel
+  symbol    String?
+  decimals  Int
+  isNative  Boolean  @default(false)
+
+  chain         Chain  @relation(fields: [chainId], references: [chainId])
+  poolsAsToken0 Pool[] @relation("token0")
+  poolsAsToken1 Pool[] @relation("token1")
+
+  @@unique([chainId, address])
+  @@index([chainId])
+  @@schema("univ4")
+}
+
+model Pool {
+  id           String   @id  // PoolId (bytes32 hex)
+  chainId      Int
+  token0Id     String
+  token1Id     String
+  fee          Int
+  tickSpacing  Int
+  hookAddress  String
+  createdBlock BigInt
+  createdAt    DateTime @default(now())
+
+  chain        Chain          @relation(fields: [chainId], references: [chainId])
+  token0       Token          @relation("token0", fields: [token0Id], references: [id])
+  token1       Token          @relation("token1", fields: [token1Id], references: [id])
+  snapshots    PoolSnapshot[]
+  swaps        Swap[]
+  positions    Position[]
+  ticks        Tick[]
+  campaigns    Campaign[]
+  epochScores  EpochScore[]
+
+  @@index([chainId])
+  @@index([token0Id, token1Id])
+  @@schema("univ4")
+}
+
+// Change-log snapshot: written only on tick crossings or ModifyLiquidity events.
+// Between events, tick and liquidity are constant — reconstruct any block's state
+// with: SELECT ... WHERE poolId=$1 AND blockNumber<=$target ORDER BY blockNumber DESC LIMIT 1
+// v2 addition: per-block snapshots for price API (separate PoolBlockState model).
+// v3 addition: TimescaleDB hypertable for OHLCV candles.
+model PoolSnapshot {
+  id                   BigInt   @id @default(autoincrement())
+  poolId               String
+  blockNumber          BigInt
+  blockHash            String   // block identity — used to correlate events within a batch
+  timestamp            DateTime
+  sqrtPriceX96         String   // uint160 as string — overflows JS Number
+  tick                 Int
+  liquidity            String   // uint128 as string
+  feeGrowthGlobal0X128 String
+  feeGrowthGlobal1X128 String
+  isFinalized          Boolean  @default(true)  // always true in v1 — we only process finalized blocks
+  triggerEvent         SnapshotTrigger  // why this snapshot was written
+
+  pool                 Pool     @relation(fields: [poolId], references: [id])
+
+  @@unique([poolId, blockNumber])
+  @@index([poolId, blockNumber])  // primary scoring query pattern
+  @@index([blockNumber])
+  @@schema("univ4")
+}
+
+// What caused this snapshot — for debugging and future analytics filtering.
+enum SnapshotTrigger {
+  TICK_CROSSING
+  MODIFY_LIQUIDITY
+  INITIALIZE
+  @@schema("univ4")
+}
+
+// v2: per-block price state for API queries (added in v2, not needed for scoring).
+// model PoolBlockState { ... }   <-- scaffolded in v2
+
+// v3: OHLCV candles via TimescaleDB time_bucket() over PoolBlockState.
+// model OHLCVCandle { ... }      <-- scaffolded in v3
+
+// No IndexedBlock model needed — we only process finalized blocks.
+// PoS finality guarantees canonical data. Gap detection is not required.
+// Crash recovery: restart the poller — it resumes from Chain.indexerHead.
+//
+// isFinalized is added to key models as a convenience flag for the score worker:
+// it only scores epochs where all blocks in the range are finalized.
+
+model Swap {
+  id           BigInt   @id @default(autoincrement())
+  poolId       String
+  blockNumber  BigInt
+  blockHash    String   // block identity
+  txHash       String
+  logIndex     Int
+  timestamp    DateTime
+  sender       String
+  recipient    String
+  amount0      String   // signed: negative = out of pool
+  amount1      String
+  sqrtPriceX96 String   // price AFTER the swap
+  liquidity    String
+  tick         Int      // tick AFTER the swap
+  fee          Decimal
+  isFinalized  Boolean  @default(true)
+
+  pool         Pool     @relation(fields: [poolId], references: [id])
+
+  @@unique([txHash, logIndex])
+  @@index([poolId, blockNumber])
+  @@index([timestamp])
+  @@schema("univ4")
+}
+
+// Position.owner is the EFFECTIVE owner -- the wallet that should receive rewards.
+// For direct PoolManager interactions: owner = sender from ModifyLiquidity.
+// For PositionManager interactions:    owner = ERC-721 holder from Transfer event.
+// ownerType distinguishes the two so the indexer knows which source to trust.
+enum OwnerType {
+  DIRECT
+  POSITION_MANAGER
+  @@schema("univ4")
+}
+
+model Position {
+  id              String    @id  // '{poolId}:{poolManagerSender}:{tickLower}:{tickUpper}:{salt}'
+  poolId          String
+  owner           String         // effective owner -- updated on PositionManager Transfer
+  ownerType       OwnerType      // how owner was resolved
+  tickLower       Int
+  tickUpper       Int
+  liquidity       String
+  depositedToken0 Decimal
+  depositedToken1 Decimal
+  withdrawnToken0 Decimal
+  withdrawnToken1 Decimal
+  createdBlock    BigInt
+  updatedBlock    BigInt
+
+  pool            Pool            @relation(fields: [poolId], references: [id])
+  token           PositionToken?
+  events          PositionEvent[]
+  epochScores     EpochScore[]
+
+  @@index([poolId])
+  @@index([owner])
+  @@schema("univ4")
+}
+
+// Tracks the ERC-721 token minted by PositionManager for each managed position.
+// The current holder of the NFT is the effective owner for reward distribution.
+model PositionToken {
+  tokenId      BigInt   @id          // ERC-721 tokenId from PositionManager
+  positionId   String   @unique      // FK -> Position.id
+  owner        String               // current NFT holder -- updated on Transfer
+  mintedBlock  BigInt
+  updatedBlock BigInt
+
+  position     Position @relation(fields: [positionId], references: [id])
+
+  @@index([owner])
+  @@schema("univ4")
+}
+
+model PositionEvent {
+  id            BigInt            @id @default(autoincrement())
+  positionId    String
+  blockNumber   BigInt
+  blockHash     String   // block identity
+  txHash        String
+  logIndex      Int
+  timestamp     DateTime
+  type          PositionEventType
+  liquidityDelta String
+  amount0       Decimal
+  amount1       Decimal
+
+  position      Position          @relation(fields: [positionId], references: [id])
+
+  @@unique([txHash, logIndex])
+  @@index([positionId, blockNumber])
+  @@schema("univ4")
+}
+
+enum PositionEventType {
+  ADD
+  REMOVE
+  @@schema("univ4")
+}
+
+model Tick {
+  id                    String   @id  // '{poolId}:{tickIndex}'
+  poolId                String
+  tickIndex             Int
+  liquidityGross        String
+  liquidityNet          String
+  feeGrowthOutside0X128 String
+  feeGrowthOutside1X128 String
+  updatedBlock          BigInt
+
+  pool                  Pool     @relation(fields: [poolId], references: [id])
+
+  @@index([poolId, tickIndex])
+  @@schema("univ4")
+}
+
+
+
+enum LiquidityMode {
+  RAW
+  // FRACTIONAL reserved for future multi-pool campaigns
+  @@schema("univ4")
+}
+
+model Campaign {
+  id               Int            @id @default(autoincrement())
+  poolId           String
+  sponsor          String
+  rewardToken      String
+  totalBudget      Decimal
+  startBlock       BigInt
+  endBlock         BigInt
+  epochLength      Int
+
+  // Formula configuration -- all weights read from here at scoring time.
+  liquidityMode    LiquidityMode  @default(RAW)   // RAW or FRACTIONAL
+  rangeWeightK     Decimal        @default(100)   // 0 = disable range bonus
+  rangeWeightMax   Decimal        @default(2.0)   // cap on range bonus multiplier
+  lambdaJIT        Decimal        @default(0.001) // 0 = disable JIT penalty
+  minLiquidity     String?                        // minimum liquidity to qualify
+  minRangeWidth    Int?                           // minimum (tickUpper - tickLower)
+
+  merkleRoot       String?
+  status           CampaignStatus @default(ACTIVE)
+  createdAt        DateTime       @default(now())
+
+  pool           Pool           @relation(fields: [poolId], references: [id])
+  epochs         Epoch[]
+
+  @@index([poolId])
+  @@index([status])
+  @@schema("univ4")
+}
+
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+  @@schema("univ4")
+}
+
+model Epoch {
+  id           Int          @id @default(autoincrement())
+  campaignId   Int
+  epochIndex   Int
+  startBlock   BigInt
+  endBlock     BigInt
+  totalScore   Decimal
+  rewardBudget Decimal
+  merkleRoot   String?
+  finalisedAt  DateTime?
+
+  campaign     Campaign     @relation(fields: [campaignId], references: [id])
+  scores       EpochScore[]
+  allocations  Allocation[]
+
+  @@unique([campaignId, epochIndex])
+  @@schema("univ4")
+}
+
+model EpochScore {
+  id            BigInt   @id @default(autoincrement())
+  epochId       Int
+  positionId    String
+  poolId        String
+  owner         String
+  blocksInRange Int
+  totalBlocks   Int
+  avgLiquidity  Decimal
+  score         Decimal
+
+  epoch         Epoch    @relation(fields: [epochId], references: [id])
+  position      Position @relation(fields: [positionId], references: [id])
+  pool          Pool     @relation(fields: [poolId], references: [id])
+
+  @@unique([epochId, positionId])
+  @@index([epochId])
+  @@index([owner])
+  @@schema("univ4")
+}
+
+model Allocation {
+  id               BigInt   @id @default(autoincrement())
+  epochId          Int
+  owner            String
+  rewardAmount     Decimal
+  cumulativeReward Decimal
+  merkleProof      String[]
+  claimed          Boolean  @default(false)
+  claimedAt        DateTime?
+  claimTxHash      String?
+
+  epoch            Epoch    @relation(fields: [epochId], references: [id])
+
+  @@unique([epochId, owner])
+  @@index([owner])
+  @@index([claimed])
+  @@schema("univ4")
+}
